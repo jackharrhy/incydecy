@@ -1,0 +1,11 @@
+[package]
+name = "incydecy"
+version = "0.1.0"
+authors = ["Jack Arthur Harrhy <me@jackharrhy.com>"]
+edition = "2018"
+
+[dependencies]
+redis = "0.11.0"
+kankyo = "0.3.0"
+serenity = "0.6.3"
+regex = "1.2.1"
