@@ -36,42 +36,49 @@ impl EventHandler for Handler {
             return;
         }
 
-        let command: &str;
-
-        match &content[content.len() - 2..content.len()] {
-            "++" => command = "INCR",
-            "--" => command = "DECR",
-            _ => return,
+        let command = match &content[content.len() - 2..content.len()] {
+            "++" => Some("INCR"),
+            "--" => Some("DECR"),
+            _ => None,
         };
 
-        if command != "" {
-            let mut data = ctx.data.write();
-
-            let redis_connection = data.get_mut::<RedisConnectionContainer>().unwrap().clone();
-
-            let redis_connection = &mut *redis_connection.lock();
-
-            let key = &content[..content.len() - 2];
-
-            println!("key: {}, command: {}", key, command);
-
-            match redis::cmd(command)
-                .arg(key)
-                .query(redis_connection)
-                .unwrap()
-            {
-                None => (),
-                Some(response) => {
-                    let new_val: isize = response;
-                    println!("New value: {}", new_val);
-
-                    let _ = message.channel_id.send_message(&ctx, |m| {
-                        m.content(format!("`{} => {}`", key, new_val));
-                        m
-                    });
-                }
-            };
+        if command.is_none() {
+            return;
         }
+
+        let command = command.unwrap();
+
+        let guild_id = match message.guild_id {
+            Some(guild_id) => guild_id,
+            None => return,
+        };
+
+        let mut data = ctx.data.write();
+
+        let redis_connection = data.get_mut::<RedisConnectionContainer>().unwrap().clone();
+
+        let redis_connection = &mut *redis_connection.lock();
+
+        let key = &content[..content.len() - 2];
+
+        println!("key: {}, command: {}", key, command);
+
+        match redis::cmd(command)
+            .arg(format!("{}:{}", guild_id, key))
+            .query(redis_connection)
+            .unwrap()
+        {
+            None => (),
+            Some(response) => {
+                let new_val: isize = response;
+                println!("New value: {}", new_val);
+
+                let _ = message.channel_id.send_message(&ctx, |m| {
+                    m.content(format!("`{} => {}`", key, new_val));
+                    m
+                });
+            }
+        };
     }
 }
 
