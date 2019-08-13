@@ -1,4 +1,5 @@
 use std::env;
+use std::str::Chars;
 use std::sync::Arc;
 
 extern crate regex;
@@ -17,22 +18,27 @@ impl TypeMapKey for RedisConnectionContainer {
     type Value = Arc<Mutex<redis::Connection>>;
 }
 
+fn is_emoji(character_iter: Chars) -> bool {
+    for character in character_iter {
+        if !unic_emoji_char::is_emoji(character) {
+            return false;
+        }
+    }
+    true
+}
+
+fn remove_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<String>()
+}
+
 struct Handler;
 
 impl EventHandler for Handler {
     fn message(&self, ctx: Context, message: Message) {
-        let content: String = message.content;
+        let content: &String = &message.content;
+        let length = content.chars().count();
 
-        println!("{}", content);
-
-        if !(content.len() <= 50 && content.is_ascii()) {
-            return;
-        }
-
-        // TODO don't create the regex on every command
-        let is_valid_command = Regex::new(r"^([\w\d<>:]*)(\+\+|\-\-)$").unwrap();
-
-        if !is_valid_command.is_match(&content) {
+        if length >= 50 || length < 3 {
             return;
         }
 
@@ -46,6 +52,21 @@ impl EventHandler for Handler {
             return;
         }
 
+        let content = &content[..content.len() - 2];
+        let stripped_content = remove_whitespace(content);
+
+        if is_emoji(stripped_content.chars()) {
+
+        } else if !(content.is_ascii()) {
+            return;
+        } else {
+            // TODO don't create the regex on every command
+            let is_valid_command = Regex::new(r"^([\w\d<>:]*)$").unwrap();
+
+            if !is_valid_command.is_match(&content) {
+                return;
+            }
+        }
         let command = command.unwrap();
 
         let guild_id = match message.guild_id {
@@ -59,12 +80,10 @@ impl EventHandler for Handler {
 
         let redis_connection = &mut *redis_connection.lock();
 
-        let key = &content[..content.len() - 2];
-
-        println!("key: {}, command: {}", key, command);
+        println!("key: {}, command: {}", content, command);
 
         match redis::cmd(command)
-            .arg(format!("{}:{}", guild_id, key))
+            .arg(format!("{}:{}", guild_id, content))
             .query(redis_connection)
             .unwrap()
         {
@@ -74,7 +93,7 @@ impl EventHandler for Handler {
                 println!("New value: {}", new_val);
 
                 let _ = message.channel_id.send_message(&ctx, |m| {
-                    m.content(format!("`{} => {}`", key, new_val));
+                    m.content(format!("{} ⟶ {}", content, new_val));
                     m
                 });
             }
