@@ -18,6 +18,11 @@ impl TypeMapKey for RedisConnectionContainer {
     type Value = Arc<Mutex<redis::Connection>>;
 }
 
+struct RegexContainer;
+impl TypeMapKey for RegexContainer {
+    type Value = Arc<Mutex<Regex>>;
+}
+
 fn is_emoji(character_iter: Chars) -> bool {
     for character in character_iter {
         if !unic_emoji_char::is_emoji(character) {
@@ -36,43 +41,42 @@ struct Handler;
 impl EventHandler for Handler {
     fn message(&self, ctx: Context, message: Message) {
         let content: &String = &message.content;
-        let length = content.chars().count();
 
-        if length >= 50 || length < 3 {
+        if content.len() >= 60 {
             return;
         }
 
-        let command = match &content[content.len() - 2..content.len()] {
+        let length = content.chars().count();
+
+        if length < 3 {
+            return;
+        }
+
+        let redis_command = match &content[content.len() - 2..content.len()] {
             "++" => Some("INCR"),
             "--" => Some("DECR"),
             _ => None,
         };
 
-        if command.is_none() {
+        if redis_command.is_none() {
             return;
         }
 
         let content = &content[..content.len() - 2];
         let stripped_content = remove_whitespace(content);
 
-        if is_emoji(stripped_content.chars()) {
-
-        } else if !(content.is_ascii()) {
+        if !is_emoji(stripped_content.chars()) || !content.is_ascii() {
             return;
         } else {
-            // TODO don't create the regex on every command
-            let is_valid_command = Regex::new(r"^([\w\d<>:]*)$").unwrap();
+            let mut data = ctx.data.write();
+
+            let is_valid_command = data.get_mut::<RegexContainer>().unwrap().clone();
+            let is_valid_command = &mut *is_valid_command.lock();
 
             if !is_valid_command.is_match(&content) {
                 return;
             }
         }
-        let command = command.unwrap();
-
-        let guild_id = match message.guild_id {
-            Some(guild_id) => guild_id,
-            None => return,
-        };
 
         let mut data = ctx.data.write();
 
@@ -80,9 +84,14 @@ impl EventHandler for Handler {
 
         let redis_connection = &mut *redis_connection.lock();
 
-        println!("key: {}, command: {}", content, command);
+        let guild_id = match message.guild_id {
+            Some(guild_id) => guild_id,
+            None => return,
+        };
 
-        match redis::cmd(command)
+        let redis_command = redis_command.unwrap();
+
+        match redis::cmd(redis_command)
             .arg(format!("{}:{}", guild_id, content))
             .query(redis_connection)
             .unwrap()
@@ -90,7 +99,6 @@ impl EventHandler for Handler {
             None => (),
             Some(response) => {
                 let new_val: isize = response;
-                println!("New value: {}", new_val);
 
                 let _ = message.channel_id.send_message(&ctx, |m| {
                     m.content(format!("{} ⟶ {}", content, new_val));
@@ -102,18 +110,27 @@ impl EventHandler for Handler {
 }
 
 fn main() {
-    kankyo::init().unwrap();
+    kankyo::init().expect("Failed to initialize kanko!");
 
-    let mut discord_client =
-        Client::new(&env::var("INCYDECY_DISCORD_TOKEN").expect("token"), Handler)
-            .expect("Error creating client");
+    let mut discord_client = Client::new(
+        &env::var("INCYDECY_DISCORD_TOKEN")
+            .expect("Couldn't get the INCYDECY_DISCORD_TOKEN variable"),
+        Handler,
+    )
+    .expect("Error creating client");
 
-    let redis_client = redis::Client::open("redis://127.0.0.1/").unwrap();
+    let redis_client =
+        redis::Client::open("redis://127.0.0.1/").expect("Couldn't connect to Redis");
 
     {
         let mut data = discord_client.data.write();
         data.insert::<RedisConnectionContainer>(Arc::new(Mutex::new(
-            redis_client.get_connection().unwrap(),
+            redis_client
+                .get_connection()
+                .expect("Couldn't get a connection to Redis"),
+        )));
+        data.insert::<RegexContainer>(Arc::new(Mutex::new(
+            Regex::new(r"^([\w\d<>:]*)$").expect("Invalid regular expression"),
         )));
     }
 
