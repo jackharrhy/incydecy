@@ -1,3 +1,6 @@
+extern crate env_logger;
+use log::debug;
+
 use std::env;
 use std::str::Chars;
 use std::sync::Arc;
@@ -40,15 +43,22 @@ struct Handler;
 
 impl EventHandler for Handler {
     fn message(&self, ctx: Context, message: Message) {
+        if message.author.bot {
+            debug!("ignoring a message from '{}' since its a bot", message.author);
+            return;
+        }
+
         let content: &String = &message.content;
 
         if content.len() >= 60 {
+            debug!("'{}' is more than 60 bytes in length", content);
             return;
         }
 
         let length = content.chars().count();
 
         if length < 3 {
+            debug!("'{}' is less than three characters in length", content);
             return;
         }
 
@@ -59,26 +69,27 @@ impl EventHandler for Handler {
         };
 
         if redis_command.is_none() {
+            debug!("'{}' is not a redis command", content);
             return;
         }
 
         let content = &content[..content.len() - 2];
         let stripped_content = remove_whitespace(content);
 
-        if !is_emoji(stripped_content.chars()) || !content.is_ascii() {
-            return;
-        } else {
-            let mut data = ctx.data.write();
+        let mut data = ctx.data.write();
 
+        if content.is_ascii() {
             let is_valid_command = data.get_mut::<RegexContainer>().unwrap().clone();
             let is_valid_command = &mut *is_valid_command.lock();
 
             if !is_valid_command.is_match(&content) {
+                debug!("'{}' is not a valid command", content);
                 return;
             }
+        } else if !is_emoji(stripped_content.chars()) {
+            debug!("'{}' is not ascii or emoji", content);
+            return;
         }
-
-        let mut data = ctx.data.write();
 
         let redis_connection = data.get_mut::<RedisConnectionContainer>().unwrap().clone();
 
@@ -100,6 +111,8 @@ impl EventHandler for Handler {
             Some(response) => {
                 let new_val: isize = response;
 
+                debug!("'{}' has a new value of '{}'", content, new_val);
+
                 let _ = message.channel_id.send_message(&ctx, |m| {
                     m.content(format!("{} ⟶ {}", content, new_val));
                     m
@@ -110,6 +123,7 @@ impl EventHandler for Handler {
 }
 
 fn main() {
+    env_logger::init();
     kankyo::init().expect("Failed to initialize kanko!");
 
     let mut discord_client = Client::new(
