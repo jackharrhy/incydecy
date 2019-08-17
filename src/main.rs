@@ -44,7 +44,10 @@ struct Handler;
 impl EventHandler for Handler {
     fn message(&self, ctx: Context, message: Message) {
         if message.author.bot {
-            debug!("ignoring a message from '{}' since its a bot", message.author);
+            debug!(
+                "ignoring a message from '{}' since its a bot",
+                message.author
+            );
             return;
         }
 
@@ -63,24 +66,25 @@ impl EventHandler for Handler {
         }
 
         let redis_command = match &content[content.len() - 2..content.len()] {
-            "++" => Some("INCR"),
-            "--" => Some("DECR"),
-            _ => None,
+            "++" => "INCR",
+            "--" => "DECR",
+            _ => {
+                debug!("'{}' is not a redis command", content);
+                return;
+            }
         };
-
-        if redis_command.is_none() {
-            debug!("'{}' is not a redis command", content);
-            return;
-        }
 
         let content = &content[..content.len() - 2];
         let stripped_content = remove_whitespace(content);
 
-        let mut data = ctx.data.write();
+        let data = ctx.data.read();
 
         if content.is_ascii() {
-            let is_valid_command = data.get_mut::<RegexContainer>().unwrap().clone();
-            let is_valid_command = &mut *is_valid_command.lock();
+            let is_valid_command_mutex = match data.get::<RegexContainer>() {
+                Some(regex) => regex.clone(),
+                None => panic!("Didn't find RegexContainer within the context"),
+            };
+            let is_valid_command = &mut *is_valid_command_mutex.lock();
 
             if !is_valid_command.is_match(&content) {
                 debug!("'{}' is not a valid command", content);
@@ -91,28 +95,33 @@ impl EventHandler for Handler {
             return;
         }
 
-        let redis_connection = data.get_mut::<RedisConnectionContainer>().unwrap().clone();
-
-        let redis_connection = &mut *redis_connection.lock();
+        let redis_connection_mutex = match data.get::<RedisConnectionContainer>() {
+            Some(con) => con.clone(),
+            None => panic!("Didn't find RedisConnectionContainer within the context"),
+        };
+        let redis_connection = &mut *redis_connection_mutex.lock();
 
         let guild_id = match message.guild_id {
-            Some(guild_id) => guild_id,
-            None => return,
+            Some(guild_id) => format!("guild.{}", guild_id),
+            None => format!("user.{}", message.author.id),
         };
 
-        let redis_command = redis_command.unwrap();
-
-        match redis::cmd(redis_command)
-            .arg(format!("{}:{}", guild_id, content))
+        let response = match redis::cmd(redis_command)
+            .arg(format!("{}.{}", guild_id, content))
             .query(redis_connection)
-            .unwrap()
         {
+            Ok(response) => response,
+            Err(error) => {
+                eprintln!("Error on running redis query: {}", error);
+                return;
+            }
+        };
+
+        match response {
             None => (),
             Some(response) => {
                 let new_val: isize = response;
-
                 debug!("'{}' has a new value of '{}'", content, new_val);
-
                 let _ = message.channel_id.send_message(&ctx, |m| {
                     m.content(format!("{} ⟶ {}", content, new_val));
                     m
