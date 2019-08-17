@@ -1,0 +1,23 @@
+version: '3.7'
+
+services:
+  incydecy:
+    image: incydecy:latest
+    environment:
+      - INCYDECY_DISCORD_TOKEN=
+      - INCYDECY_REDIS_HOST=redis
+      - INCYDECY_REDIS_DATBASE=0
+    networks:
+      - redis
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:5-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    hostname: redis
+    networks:
+      - redis
+
+networks:
+  redis:

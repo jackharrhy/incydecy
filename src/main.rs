@@ -134,7 +134,10 @@ impl EventHandler for Handler {
 
 fn get_env_var(env_var: &str, default: Option<&str>) -> String {
     match env::var(env_var) {
-        Ok(val) => val,
+        Ok(val) => {
+            debug!("got value '{}' for environment variable '{}'", val, env_var);
+            val
+        }
         Err(error) => {
             if let Some(default) = default {
                 info!("{} not set, defaulting to {}", env_var, default);
@@ -172,11 +175,7 @@ fn get_redis_connection_info() -> redis::ConnectionInfo {
 fn main() {
     kankyo::init().ok();
 
-    env_logger::init_from_env(
-        env_logger::Env::default()
-            .filter_or("incydecy", "warn")
-            .write_style("inydecy"),
-    );
+    env_logger::init();
 
     let mut discord_client = match Client::new(get_env_var("INCYDECY_DISCORD_TOKEN", None), Handler)
     {
