@@ -170,11 +170,22 @@ fn get_redis_connection_info() -> redis::ConnectionInfo {
 }
 
 fn main() {
-    env_logger::init();
-    kankyo::init().expect("Failed to initialize kanko!");
+    kankyo::init().ok();
 
-    let mut discord_client = Client::new(get_env_var("INCYDECY_DISCORD_TOKEN", None), Handler)
-        .expect("Error creating client");
+    env_logger::init_from_env(
+        env_logger::Env::default()
+            .filter_or("incydecy", "warn")
+            .write_style("inydecy"),
+    );
+
+    let mut discord_client = match Client::new(get_env_var("INCYDECY_DISCORD_TOKEN", None), Handler)
+    {
+        Ok(dc) => dc,
+        Err(error) => {
+            warn!("Creating Discord client failed: {}", error);
+            process::exit(1);
+        }
+    };
 
     let redis_client = match redis::Client::open(get_redis_connection_info()) {
         Ok(rc) => rc,
