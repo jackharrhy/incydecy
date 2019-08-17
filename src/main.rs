@@ -1,9 +1,10 @@
-extern crate env_logger;
-use log::debug;
-
 use std::env;
+use std::process;
 use std::str::Chars;
 use std::sync::Arc;
+
+extern crate env_logger;
+use log::{debug, info, warn};
 
 extern crate regex;
 use regex::Regex;
@@ -101,18 +102,18 @@ impl EventHandler for Handler {
         };
         let redis_connection = &mut *redis_connection_mutex.lock();
 
-        let guild_id = match message.guild_id {
+        let id = match message.guild_id {
             Some(guild_id) => format!("guild.{}", guild_id),
             None => format!("user.{}", message.author.id),
         };
 
         let response = match redis::cmd(redis_command)
-            .arg(format!("{}.{}", guild_id, content))
+            .arg(format!("{}.{}", id, content))
             .query(redis_connection)
         {
             Ok(response) => response,
             Err(error) => {
-                eprintln!("Error on running redis query: {}", error);
+                warn!("Error on running redis query: {}", error);
                 return;
             }
         };
@@ -131,19 +132,57 @@ impl EventHandler for Handler {
     }
 }
 
+fn get_env_var(env_var: &str, default: Option<&str>) -> String {
+    match env::var(env_var) {
+        Ok(val) => val,
+        Err(error) => {
+            if let Some(default) = default {
+                info!("{} not set, defaulting to {}", env_var, default);
+                default.to_string()
+            } else {
+                warn!("{} not set, no default: {}", env_var, error);
+                process::exit(1);
+            }
+        }
+    }
+}
+
+fn get_redis_connection_info() -> redis::ConnectionInfo {
+    redis::ConnectionInfo {
+        addr: Box::new(redis::ConnectionAddr::Tcp(
+            get_env_var("INCYDECY_REDIS_HOST", Some("127.0.0.1")),
+            get_env_var("INCYDECY_REDIS_PORT", Some("6379"))
+                .parse::<u16>()
+                .unwrap_or(6379),
+        )),
+        db: get_env_var("INCYDECY_REDIS_DATABASE", Some("0"))
+            .parse::<i64>()
+            .unwrap_or(0),
+        passwd: {
+            let redis_passwd = get_env_var("INCYDECY_REDIS_PASSWORD", Some(""));
+            if redis_passwd == "" {
+                None
+            } else {
+                Some(redis_passwd)
+            }
+        },
+    }
+}
+
 fn main() {
     env_logger::init();
     kankyo::init().expect("Failed to initialize kanko!");
 
-    let mut discord_client = Client::new(
-        &env::var("INCYDECY_DISCORD_TOKEN")
-            .expect("Couldn't get the INCYDECY_DISCORD_TOKEN variable"),
-        Handler,
-    )
-    .expect("Error creating client");
+    let mut discord_client = Client::new(get_env_var("INCYDECY_DISCORD_TOKEN", None), Handler)
+        .expect("Error creating client");
 
-    let redis_client =
-        redis::Client::open("redis://127.0.0.1/").expect("Couldn't connect to Redis");
+    let redis_client = match redis::Client::open(get_redis_connection_info()) {
+        Ok(rc) => rc,
+        Err(error) => {
+            warn!("Error connecting to redis: {}", error);
+            process::exit(1);
+        }
+    };
 
     {
         let mut data = discord_client.data.write();
