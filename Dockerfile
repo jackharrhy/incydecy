@@ -1,4 +1,4 @@
-FROM ekidd/rust-musl-builder:stable AS builder
+FROM ekidd/rust-musl-builder:nightly-2020-04-10 AS builder
 
 ADD . ./
 
@@ -10,7 +10,5 @@ FROM alpine:latest
 COPY --from=builder \
     /home/rust/src/target/x86_64-unknown-linux-musl/release/incydecy \
     /usr/local/bin/
-
-WORKDIR /app
 
 CMD /usr/local/bin/incydecy
