@@ -47,6 +47,26 @@ fn init_database() -> SqlResult<Connection> {
     Ok(conn)
 }
 
+fn get_leaderboard(conn: &Connection, guild_id: &str) -> SqlResult<Vec<(String, i32)>> {
+    let mut stmt = conn.prepare(
+        "SELECT thing, current_value FROM value
+         WHERE guild_id = ?
+         ORDER BY current_value DESC
+         LIMIT 10",
+    )?;
+
+    let rows = stmt.query_map([guild_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+    })?;
+
+    let mut leaderboard = Vec::new();
+    for row in rows {
+        leaderboard.push(row?);
+    }
+
+    Ok(leaderboard)
+}
+
 fn process_increment_decrement(
     conn: &Connection,
     guild_id: &str,
@@ -90,7 +110,42 @@ fn process_increment_decrement(
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
         if let Some(guild_id) = msg.guild_id {
-            if let Some(captures) = self.regex.captures(&msg.content) {
+            if msg.mentions_me(&ctx.http).await.unwrap_or(false)
+                && msg.content.to_lowercase().contains("leaderboard")
+            {
+                let db = self.db.clone();
+                let guild_id_str = guild_id.to_string();
+
+                let result = {
+                    match db.lock() {
+                        Ok(conn) => get_leaderboard(&conn, &guild_id_str),
+                        Err(why) => {
+                            println!("Failed to acquire database lock: {why:?}");
+                            return;
+                        }
+                    }
+                };
+
+                match result {
+                    Ok(leaderboard) => {
+                        let mut response = String::from("**Leaderboard:**\n");
+                        for (i, (thing, value)) in leaderboard.iter().enumerate() {
+                            response.push_str(&format!("{}. {} ⟶ {}\n", i + 1, thing, value));
+                        }
+
+                        if leaderboard.is_empty() {
+                            response = String::from("No values tracked yet!");
+                        }
+
+                        if let Err(why) = msg.channel_id.say(&ctx.http, &response).await {
+                            println!("Error sending leaderboard: {why:?}");
+                        }
+                    }
+                    Err(why) => {
+                        println!("Database error getting leaderboard: {why:?}");
+                    }
+                }
+            } else if let Some(captures) = self.regex.captures(&msg.content) {
                 let thing = &captures[1];
                 let operation = &captures[2];
                 let effect = if operation == "++" { 1 } else { -1 };
