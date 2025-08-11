@@ -76,7 +76,7 @@ fn process_increment_decrement(
     drop(stmt);
 
     tx.execute(
-        "INSERT INTO messages (id, guild_id, channel_id, author_id, content, time_sent, thing, effect, value_id)
+        "INSERT OR REPLACE INTO messages (id, guild_id, channel_id, author_id, content, time_sent, thing, effect, value_id)
          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)",
         [message_id, guild_id, channel_id, author_id, content, thing, &effect.to_string(), &value_id.to_string()]
     )?;
@@ -94,6 +94,8 @@ impl EventHandler for Handler {
                 let thing = &captures[1];
                 let operation = &captures[2];
                 let effect = if operation == "++" { 1 } else { -1 };
+
+                println!("Processing message: {thing} {operation}");
 
                 let db = self.db.clone();
                 let guild_id_str = guild_id.to_string();
@@ -124,6 +126,8 @@ impl EventHandler for Handler {
 
                 match result {
                     Ok(new_value) => {
+                        println!("Processed message: {thing} {operation} ⟶ {}", new_value);
+
                         let response = format!("{} ⟶ {}", thing, new_value);
                         if let Err(why) = msg.channel_id.say(&ctx.http, &response).await {
                             println!("Error sending message: {why:?}");
@@ -140,7 +144,7 @@ impl EventHandler for Handler {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenvy::dotenv()?;
+    let _ = dotenvy::dotenv();
 
     let conn = init_database().expect("Failed to initialize database");
     let db = Arc::new(Mutex::new(conn));
@@ -157,6 +161,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .event_handler(handler)
         .await
         .expect("Error creating client");
+
+    println!("Starting incydecy");
 
     if let Err(why) = client.start().await {
         println!("Client error: {why:?}");
