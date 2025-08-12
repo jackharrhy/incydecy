@@ -88,6 +88,42 @@ fn get_user_leaderboard(conn: &Connection, guild_id: &str) -> SqlResult<Vec<(Str
     Ok(leaderboard)
 }
 
+async fn resolve_user_display_name(
+    ctx: &Context,
+    guild_id: serenity::model::id::GuildId,
+    user_id: &str,
+) -> String {
+    if let Ok(user_id_parsed) = user_id.parse::<u64>() {
+        let user_id_snowflake = serenity::model::id::UserId::new(user_id_parsed);
+
+        let cached_result = {
+            if let Some(guild) = ctx.cache.guild(guild_id) {
+                if let Some(member) = guild.members.get(&user_id_snowflake) {
+                    Some(member.display_name().to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(name) = cached_result {
+            name
+        } else if let Some(user) = ctx.cache.user(user_id_snowflake) {
+            user.name.clone()
+        } else if let Ok(member) = ctx.http.get_member(guild_id, user_id_snowflake).await {
+            member.display_name().to_string()
+        } else if let Ok(user) = ctx.http.get_user(user_id_snowflake).await {
+            user.name.clone()
+        } else {
+            format!("User#{}", user_id)
+        }
+    } else {
+        format!("Invalid#{}", user_id)
+    }
+}
+
 fn process_increment_decrement(
     conn: &Connection,
     guild_id: &str,
@@ -155,10 +191,12 @@ impl EventHandler for Handler {
                         Ok(leaderboard) => {
                             let mut response = String::from("**User Leaderboard:**\n");
                             for (i, (user_id, count)) in leaderboard.iter().enumerate() {
+                                let display_name =
+                                    resolve_user_display_name(&ctx, guild_id, user_id).await;
                                 response.push_str(&format!(
-                                    "{}. <@{}> ⟶ {} invocations\n",
+                                    "{}. {} ⟶ {} invocations\n",
                                     i + 1,
-                                    user_id,
+                                    display_name,
                                     count
                                 ));
                             }
