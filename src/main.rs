@@ -151,7 +151,12 @@ impl EventHandler for Handler {
                         Ok(leaderboard) => {
                             let mut response = String::from("**User Leaderboard:**\n");
                             for (i, (user_id, count)) in leaderboard.iter().enumerate() {
-                                response.push_str(&format!("{}. <@{}> ⟶ {} invocations\n", i + 1, user_id, count));
+                                response.push_str(&format!(
+                                    "{}. <@{}> ⟶ {} invocations\n",
+                                    i + 1,
+                                    user_id,
+                                    count
+                                ));
                             }
 
                             if leaderboard.is_empty() {
