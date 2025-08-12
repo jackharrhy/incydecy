@@ -130,6 +130,10 @@ fn process_increment_decrement(
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
+        if msg.author.bot {
+            return;
+        }
+
         if let Some(guild_id) = msg.guild_id {
             if msg.mentions_me(&ctx.http).await.unwrap_or(false) {
                 let content_lower = msg.content.to_lowercase();
